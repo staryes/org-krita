@@ -3,7 +3,7 @@
 ;; Copyright (c) 2020 Abhinav Tushar
 
 ;; Author: Abhinav Tushar <abhinav@lepisma.xyz>
-;; Version: 0.1.4
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "26") (f "0.20.0") (org "9.3"))
 ;; URL: https://github.com/lepisma/org-krita
 
@@ -39,6 +39,29 @@
 
 ;; NOTE: Only single reference for a file supported as of now.
 
+(defgroup org-krita nil
+  "Org-krita customization."
+  :group 'org
+  :package-version '(org-krita . "0.2.0"))
+
+(defcustom org-krita-append-ext-kra t
+  "Append automatically .kra extension."
+  :group 'org-krita
+  :type 'boolean
+  :package-version '(org-krita . "0.2.0"))
+
+(defcustom org-krita-get-new-filepath (lambda () (read-file-name "New krita file: "))
+  "Function returning filepath of new created image."
+  :group 'org-krita
+  :type 'function
+  :package-version '(org-krita . "0.2.0"))
+
+(defcustom org-krita-get-new-desc (lambda () (read-string "Description: "))
+  "Function returning description of new created image."
+  :group 'org-krita
+  :type 'function
+  :package-version '(org-krita . "0.2.0"))
+
 (defvar-local org-krita-watchers nil
   "A-list mapping file names to change watcher descriptors.")
 
@@ -53,7 +76,25 @@
   (expand-file-name file (file-name-as-directory (concat org-krita-dir "resources"))))
 
 (defun org-krita-export (_path _desc _backend)
-  (error "Krita export not implemented yet."))
+  "Export krita canvas _PATH from Org files.
+Argument _DESC refers to link description.
+Argument _BACKEND refers to export backend."
+  (let ((png-path (f-swap-ext _path "png")))
+    (cl-case _backend
+      (html (format "<img src=\"%s\">"
+                    (prog1 png-path
+                      (org-krita-save-image _path png-path))))
+      (ascii (format "%s (%s)" (or _desc _path) _path))
+      (latex (format "\\includegraphics[width=\\textheight,height=\\textwidth,keepaspectratio]{%s}"
+                     (prog1 png-path
+                       (org-krita-save-image _path png-path)))))))
+
+(defun org-krita-save-image (kra-path png-path)
+  "Extract from KRA-PATH a .png and write it to PNG-PATH."
+  (let ((image (create-image (org-krita-extract-png kra-path) 'png t)))
+    (with-temp-buffer
+      (insert (plist-get (cdr image) :data))
+      (write-region (point-min) (point-max) png-path))))
 
 (defun org-krita-make-new-image (output-kra-path &optional width height)
   "Create a new image based on a template at OUTPUT-KRA-PATH."
@@ -65,7 +106,7 @@
   "Extract png from given KRA-PATH and return data."
   (with-temp-buffer
     (set-buffer-multibyte nil)
-    (archive-zip-extract kra-path "mergedimage.png")
+    (archive-zip-extract (expand-file-name kra-path) "mergedimage.png")
     (buffer-string)))
 
 (defun org-krita-get-links ()
@@ -133,23 +174,24 @@ If FULL-MODE is not null, run full krita."
   (org-krita-hide-all))
 
 (defun org-krita-validate-path (path)
-  "Validate the file PATH as a krita path after confirming from
-the user."
+  "Validate the file PATH as a krita path."
   (if (f-ext-p path "kra")
       path
-    (if (y-or-n-p "The file doesn't have .kra extension, do you want to add that automatically?")
+    (if org-krita-append-ext-kra
         (concat path ".kra")
       path)))
 
 ;;;###autoload
-(defun org-krita-insert-new-image (output-kra-path link-name)
+(defun org-krita-insert-new-image (output-kra-path desc)
   "Insert new image in current buffer."
-  (interactive "FNew krita file: \nsLink Name: ")
-  (let ((output-kra-path (org-krita-validate-path output-kra-path)))
-    (org-krita-make-new-image output-kra-path)
-    (org-insert-link nil (concat "krita:" output-kra-path) link-name)
-    ;; TODO: Enable only the new image
-    (org-krita-enable)))
+  (interactive
+   (let ((output-kra-path (funcall org-krita-get-new-filepath))
+         (desc (funcall org-krita-get-new-desc)))
+     (list (org-krita-validate-path output-kra-path) desc)))
+  (org-krita-make-new-image output-kra-path)
+  (org-insert-link nil (concat "krita:" output-kra-path) desc)
+  ;; TODO: Enable only the new image
+  (org-krita-enable))
 
 ;;;###autoload
 (define-minor-mode org-krita-mode
